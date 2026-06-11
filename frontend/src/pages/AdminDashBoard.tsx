@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import jsPDF from "jspdf";
 import { Trash2 } from "lucide-react";
+import { apiFetch } from "../lib/api";
 
 type Academico = {
   id: number;
@@ -59,24 +60,14 @@ function AdminDashboard() {
   const [dataInicial, setDataInicial] = useState("");
   const [dataFinal, setDataFinal] = useState("");
 
-  function obterHeadersAutenticados() {
-    return {
-      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-    };
-  }
-
   function carregarAcademicos() {
-    fetch("http://localhost:5294/academicos", {
-      headers: obterHeadersAutenticados(),
-    })
+    apiFetch("/academicos")
       .then((res) => res.json())
       .then((dados) => setAcademicos(dados));
   }
 
   function carregarRegistros() {
-    fetch("http://localhost:5294/registros-ponto", {
-      headers: obterHeadersAutenticados(),
-    })
+    apiFetch("/registros-ponto")
       .then((res) => res.json())
       .then((dados) => setRegistros(dados));
   }
@@ -92,12 +83,8 @@ function AdminDashboard() {
       return;
     }
 
-    const resposta = await fetch("http://localhost:5294/academicos", {
+    const resposta = await apiFetch("/academicos", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...obterHeadersAutenticados(),
-      },
       body: JSON.stringify({
         matricula,
         nome,
@@ -129,9 +116,8 @@ function AdminDashboard() {
     const confirmar = confirm("Tem certeza que deseja excluir este usuário?");
     if (!confirmar) return;
 
-    const resposta = await fetch(`http://localhost:5294/academicos/${id}`, {
+    const resposta = await apiFetch(`/academicos/${id}`, {
       method: "DELETE",
-      headers: obterHeadersAutenticados(),
     });
 
     if (resposta.ok) {

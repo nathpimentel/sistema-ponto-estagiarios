@@ -3,7 +3,6 @@ using backend.Models;
 
 namespace backend.Data;
 
-//Contexto principal
 public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options)
@@ -11,9 +10,20 @@ public class AppDbContext : DbContext
     {
     }
 
-//Tabela de acad.
     public DbSet<Academico> Academicos { get; set; }
 
-//Tabela de registro de ponto
     public DbSet<RegistroPonto> RegistrosPonto { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<Academico>()
+            .HasIndex(a => a.Email)
+            .IsUnique();
+
+        modelBuilder.Entity<Academico>()
+            .HasIndex(a => a.Matricula)
+            .IsUnique();
+    }
 }

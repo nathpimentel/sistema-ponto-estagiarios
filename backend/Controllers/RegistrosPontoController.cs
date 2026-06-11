@@ -36,8 +36,12 @@ public class RegistrosPontoController : ControllerBase
     }
 
     [Authorize]
+
     [HttpGet]
-    public IActionResult Get()
+    public IActionResult Get(
+        DateTime? dataInicial,
+        DateTime? dataFinal
+)
     {
         var academicoIdLogado = ObterAcademicoIdLogado();
 
@@ -48,7 +52,28 @@ public class RegistrosPontoController : ControllerBase
 
         var usuarioEhAdmin = UsuarioEhAdmin();
 
-        var registros = _context.RegistrosPonto
+        var query = _context.RegistrosPonto
+    .Include(r => r.Academico)
+    .Where(r =>
+        usuarioEhAdmin ||
+        r.AcademicoId == academicoIdLogado.Value
+    );
+
+if (dataInicial.HasValue)
+{
+    query = query.Where(r =>
+        r.Data.Date >= dataInicial.Value.Date
+    );
+}
+
+if (dataFinal.HasValue)
+{
+    query = query.Where(r =>
+        r.Data.Date <= dataFinal.Value.Date
+    );
+}
+
+       var registros = query
             .Include(r => r.Academico)
             .Where(r => usuarioEhAdmin || r.AcademicoId == academicoIdLogado.Value)
             .OrderByDescending(r => r.HoraEntrada)
@@ -61,11 +86,11 @@ public class RegistrosPontoController : ControllerBase
                 r.HoraSaida,
                 r.TotalTrabalhado,
                 Academico = r.Academico == null ? null : new
-                {
-                    r.Academico.Matricula,
-                    r.Academico.Nome,
-                    r.Academico.Email,
-                    r.Academico.EhAdmin,
+{
+    r.Academico.Id,
+    r.Academico.Matricula,
+    r.Academico.Nome,
+    r.Academico.Email,
                     r.Academico.HorarioEntrada,
                     r.Academico.HorarioSaida,
                     r.Academico.Ativo
@@ -97,21 +122,21 @@ public class RegistrosPontoController : ControllerBase
             return NotFound("Academico nao encontrado.");
         }
 
-        var hoje = DateTime.Today;
+        var hoje = DateTime.UtcNow.Date;
 
         var registrosHoje = _context.RegistrosPonto.Count(r =>
             r.AcademicoId == academicoId.Value &&
-            r.Data == hoje
+            r.Data.Date == hoje
         );
 
         if (registrosHoje >= 2)
         {
-            return BadRequest("Limite diário atingido: são permitidas apenas 2 entradas e 2 saídas por dia.");
+            return BadRequest("Limite diário atingido: máximo de 2 expedientes por dia.");
         }
 
         var entradaAberta = _context.RegistrosPonto.Any(r =>
             r.AcademicoId == academicoId.Value &&
-            r.Data == hoje &&
+            r.Data.Date == hoje &&
             r.HoraSaida == null
         );
 
@@ -123,8 +148,8 @@ public class RegistrosPontoController : ControllerBase
         var registro = new RegistroPonto
         {
             AcademicoId = academicoId.Value,
-            Data = DateTime.Now.Date,
-            HoraEntrada = DateTime.Now
+            Data = DateTime.UtcNow.Date,
+            HoraEntrada = DateTime.UtcNow
         };
 
         _context.RegistrosPonto.Add(registro);
@@ -144,7 +169,7 @@ public class RegistrosPontoController : ControllerBase
             return Unauthorized();
         }
 
-        var hoje = DateTime.Today;
+        var hoje = DateTime.UtcNow.Date;
 
         var academicoExiste = _context.Academicos.Any(a =>
             a.Id == academicoId.Value &&
@@ -156,21 +181,11 @@ public class RegistrosPontoController : ControllerBase
             return NotFound("Academico nao encontrado.");
         }
 
-        var saidasHoje = _context.RegistrosPonto.Count(r =>
-            r.AcademicoId == academicoId.Value &&
-            r.Data == hoje &&
-            r.HoraSaida != null
-        );
-
-        if (saidasHoje >= 2)
-        {
-            return BadRequest("Limite diário atingido: são permitidas apenas 2 saídas por dia.");
-        }
 
         var registro = _context.RegistrosPonto
             .Where(r =>
                 r.AcademicoId == academicoId.Value &&
-                r.Data == hoje &&
+                r.Data.Date == hoje &&
                 r.HoraSaida == null
             )
             .OrderByDescending(r => r.HoraEntrada)
@@ -186,7 +201,7 @@ public class RegistrosPontoController : ControllerBase
             return BadRequest("Registro de entrada invalido.");
         }
 
-        var horaSaida = DateTime.Now;
+        var horaSaida = DateTime.UtcNow;
 
         registro.HoraSaida = horaSaida;
         registro.TotalTrabalhado = horaSaida - registro.HoraEntrada.Value;
