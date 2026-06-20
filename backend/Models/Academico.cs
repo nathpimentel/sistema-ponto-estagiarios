@@ -22,4 +22,8 @@ public class Academico
     public string HorarioSaida { get; set; } = string.Empty;
 
     public bool Ativo { get; set; } = true;
+
+    public string? PrimeiroAcessoToken { get; set; }
+
+    public DateTime? PrimeiroAcessoTokenExpiraEm { get; set; }
 }
