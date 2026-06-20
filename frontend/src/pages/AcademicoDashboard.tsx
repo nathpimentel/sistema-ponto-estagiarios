@@ -1,3 +1,4 @@
+import { useAuth } from "../hooks/useAuth";
 import { useEffect, useState } from "react";
 import jsPDF from "jspdf";
 
@@ -13,14 +14,17 @@ type Usuario = {
 type RegistroPonto = {
   id: number;
   academicoId: number;
-  data: string;
-  horaEntrada: string;
-  horaSaida: string | null;
-  totalTrabalhado: string | null;
+  nomeAcademico: string;
+
+  entrada: string;
+
+  saida: string | null;
+
+  totalHoras: string | null;
 };
 
 function AcademicoDashboard() {
-  const [usuario, setUsuario] = useState<Usuario | null>(null);
+  const { usuario } = useAuth();
   const [registros, setRegistros] = useState<RegistroPonto[]>([]);
   const [horaAtual, setHoraAtual] = useState(new Date());
 
@@ -33,31 +37,27 @@ function AcademicoDashboard() {
     };
   }
 
-  useEffect(() => {
-    const usuarioSalvo = localStorage.getItem("usuario");
-
-    if (usuarioSalvo) {
-      const usuarioConvertido = JSON.parse(usuarioSalvo);
-      setUsuario(usuarioConvertido);
-      carregarRegistros();
-    }
-
-    const timer = setInterval(() => {
-      setHoraAtual(new Date());
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, []);
-
-  function carregarRegistros() {
-    fetch("http://localhost:5294/registros-ponto", {
-      headers: obterHeadersAutenticados(),
-    })
-      .then((res) => res.json())
-      .then((dados) => {
-        setRegistros(dados);
-      });
+useEffect(() => {
+  if (usuario) {
+    carregarRegistros();
   }
+
+  const timer = setInterval(() => {
+    setHoraAtual(new Date());
+  }, 1000);
+
+  return () => clearInterval(timer);
+}, [usuario]);
+
+function carregarRegistros() {
+  fetch("http://localhost:5294/registros-ponto", {
+    headers: obterHeadersAutenticados(),
+  })
+    .then((res) => res.json())
+    .then((dados) => {
+      setRegistros(dados.data);
+    });
+}
 
   async function registrarEntrada() {
     if (!usuario) return;
@@ -109,9 +109,9 @@ function AcademicoDashboard() {
   }
 
   function segundosDoRegistro(registro: RegistroPonto) {
-    if (!registro.totalTrabalhado) return 0;
+    if (!registro.totalHoras) return 0;
 
-    const [horas, minutos, segundos] = registro.totalTrabalhado
+    const [horas, minutos, segundos] = registro.totalHoras
       .split(".")[0]
       .split(":")
       .map(Number);
@@ -253,15 +253,15 @@ function AcademicoDashboard() {
 
     const registrosPeriodo = registros
       .filter((registro) => {
-        const dataRegistro = new Date(registro.data);
+        const dataRegistro = new Date(registro.entrada);
 
         return dataRegistro >= inicio && dataRegistro <= fim;
       })
       .sort(
-        (a, b) =>
-          new Date(a.horaEntrada).getTime() -
-          new Date(b.horaEntrada).getTime()
-      );
+  (a, b) =>
+    new Date(a.entrada).getTime() -
+    new Date(b.entrada).getTime()
+);
 
     if (registrosPeriodo.length === 0) {
       alert("Nenhum registro encontrado nesse período.");
@@ -314,16 +314,16 @@ function AcademicoDashboard() {
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
       pdf.setTextColor(51, 65, 85);
-      pdf.text(formatarDataTabela(registro.data), 47, posicaoY, {
+      pdf.text(formatarDataTabela(registro.entrada), 47, posicaoY, {
         align: "center",
       });
-      pdf.text(formatarHora(registro.horaEntrada), 95, posicaoY, {
+      pdf.text(formatarHora(registro.entrada), 95, posicaoY, {
         align: "center",
       });
-      pdf.text(formatarHora(registro.horaSaida), 135, posicaoY, {
+      pdf.text(formatarHora(registro.saida), 135, posicaoY, {
         align: "center",
       });
-      pdf.text(formatarTotal(registro.totalTrabalhado), 170, posicaoY, {
+      pdf.text(formatarTotal(registro.totalHoras), 170, posicaoY, {
         align: "center",
       });
 
@@ -333,7 +333,7 @@ function AcademicoDashboard() {
     pdf.save(`relatorio-${usuarioAtual.nome}.pdf`);
   }
   const registrosHoje = registros.filter((registro) => {
-    const dataRegistro = new Date(registro.data).toDateString();
+    const dataRegistro = new Date(registro.entrada).toDateString();
     const hoje = new Date().toDateString();
 
     return dataRegistro === hoje;
@@ -350,7 +350,7 @@ function AcademicoDashboard() {
 
   function obterStatusAtual() {
     const entradaAberta = registrosHoje.find(
-      (registro) => registro.horaSaida === null
+      (registro) => registro.saida === null
     );
 
     if (entradaAberta) return "No expediente";
@@ -373,7 +373,7 @@ function AcademicoDashboard() {
     );
 
     const registrosDoExpediente = registrosHoje.filter((registro) => {
-      const horaEntrada = new Date(registro.horaEntrada);
+      const horaEntrada = new Date(registro.entrada);
 
       return horaEntrada >= inicioValidoDoExpediente;
     });
@@ -531,23 +531,23 @@ function AcademicoDashboard() {
                 className="rounded-2xl border border-slate-200 bg-slate-50 p-5"
               >
                 <p className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-500">
-                  {formatarDataRelatorio(registro.data)}
+                  {formatarDataRelatorio(registro.entrada)}
                 </p>
 
                 <p>
-                  <strong>Entrada:</strong> {formatarHora(registro.horaEntrada)}
+                  <strong>Entrada:</strong> {formatarHora(registro.entrada)}
                 </p>
 
                 <p>
                   <strong>Saída:</strong>{" "}
-                  {registro.horaSaida
-                    ? formatarHora(registro.horaSaida)
-                    : "Ainda não registrada"}
+                  {registro.saida
+  ? formatarHora(registro.saida)
+  : "Ainda não registrada"}
                 </p>
 
                 <p>
                   <strong>Total trabalhado:</strong>{" "}
-                  {formatarTotal(registro.totalTrabalhado)}
+                  {formatarTotal(registro.totalHoras)}
                 </p>
               </div>
             ))}
