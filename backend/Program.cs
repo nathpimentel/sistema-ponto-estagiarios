@@ -1,3 +1,11 @@
+
+using backend.Middlewares;
+using backend.Services;
+using backend.Services.Interfaces;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Identity;
+using backend.Models;
 using backend.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -6,6 +14,22 @@ using Microsoft.OpenApi.Models;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("login", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 5;
+
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+
+        limiterOptions.QueueProcessingOrder = QueueProcessingOrder.OldestFirst;
+
+        limiterOptions.QueueLimit = 0;
+    });
+
+    options.RejectionStatusCode = 429;
+});
 
 //Permite usar os controllers da API
 builder.Services.AddControllers();
@@ -56,41 +80,60 @@ builder.Services.AddCors(options =>
 
             policy.WithOrigins(allowedOrigins)
                   .WithHeaders("Content-Type", "Authorization")
-                  .WithMethods("GET", "POST", "DELETE", "OPTIONS");
+                  .WithMethods("GET", "POST", "PUT", "DELETE")
+                .AllowCredentials();
         });
 });
+
+builder.Services.AddScoped<IPasswordHasher<Academico>, PasswordHasher<Academico>>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = false,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            IssuerSigningKey = new SymmetricSecurityKey(
-                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)
-            )
-        };
+       options.RequireHttpsMetadata = false;
+
+       options.TokenValidationParameters = new TokenValidationParameters
+{
+    ValidateIssuer = true,
+    ValidateAudience = true,
+    ValidateLifetime = true,
+    ValidateIssuerSigningKey = true,
+
+    ValidIssuer = builder.Configuration["Jwt:Issuer"],
+    ValidAudience = builder.Configuration["Jwt:Audience"],
+
+    IssuerSigningKey = new SymmetricSecurityKey(
+        Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)
+    ),
+
+    ClockSkew = TimeSpan.Zero
+};
     });
 
 builder.Services.AddAuthorization();
 
 //Configura conexão com SQL server
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection")
-    ));
+    options.UseNpgsql(
+    builder.Configuration.GetConnectionString("DefaultConnection")
+));
+
+builder.Services.AddScoped<
+    IAcademicoService,
+    AcademicoService
+>();
+
+builder.Services.AddScoped<
+    IRegistroPontoService,
+    RegistroPontoService
+>();
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    dbContext.Database.Migrate();
-}
+app.UseMiddleware<
+    ExceptionMiddleware
+>();
+
 
 app.UseSwagger();
 app.UseSwaggerUI();
@@ -98,10 +141,16 @@ app.UseSwaggerUI();
 //Aplica configuração do CORS (faz o backend usar as regras de acesso)
 app.UseCors("AllowFrontend");
 
+app.UseHttpsRedirection();
+
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 //Ativa rota dos controllers
 app.MapControllers();
+
+await SeedData.InicializarAsync(app.Services);
 
 app.Run();

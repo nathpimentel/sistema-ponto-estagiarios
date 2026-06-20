@@ -15,15 +15,16 @@ type Academico = {
 
 type RegistroPonto = {
   id: number;
-  data: string;
-  horaEntrada: string;
-  horaSaida: string | null;
-  totalTrabalhado: string | null;
-  academico?: {
-    matricula: string;
-    nome: string;
-    email: string;
-  };
+
+  academicoId: number;
+
+  nomeAcademico: string;
+
+  entrada: string;
+
+  saida: string | null;
+
+  totalHoras: string | null;
 };
 
 type StatusAcademico = {
@@ -70,7 +71,7 @@ function AdminDashboard() {
       headers: obterHeadersAutenticados(),
     })
       .then((res) => res.json())
-      .then((dados) => setAcademicos(dados));
+      .then((dados) => setAcademicos(dados.data ?? dados));
   }
 
   function carregarRegistros() {
@@ -78,7 +79,7 @@ function AdminDashboard() {
       headers: obterHeadersAutenticados(),
     })
       .then((res) => res.json())
-      .then((dados) => setRegistros(dados));
+      .then((dados) => setRegistros(dados.data ?? dados));
   }
 
   useEffect(() => {
@@ -203,17 +204,17 @@ function AdminDashboard() {
 
     const registrosHoje = registros
       .filter((registro) => {
-        const dataRegistro = new Date(registro.data).toDateString();
+        const dataRegistro = new Date(registro.entrada).toDateString();
 
         return (
-          registro.academico?.email === academico.email &&
+          registro.nomeAcademico === academico.nome &&
           dataRegistro === hoje
         );
       })
       .sort(
         (a, b) =>
-          new Date(a.horaEntrada).getTime() -
-          new Date(b.horaEntrada).getTime()
+          new Date(a.entrada).getTime() -
+          new Date(b.entrada).getTime()
       );
 
     const limiteAtraso = criarDataComHorario(academico.horarioEntrada);
@@ -229,11 +230,11 @@ function AdminDashboard() {
     );
 
     const entradaAberta = registrosHoje.find(
-      (registro) => registro.horaSaida === null
+      (registro) => registro.saida === null
     );
 
     if (entradaAberta) {
-      const horaEntrada = new Date(entradaAberta.horaEntrada);
+      const horaEntrada = new Date(entradaAberta.entrada);
 
       if (horaEntrada > limiteAtraso) {
         return {
@@ -247,7 +248,7 @@ function AdminDashboard() {
     }
 
     const registrosDoExpediente = registrosHoje.filter((registro) => {
-      const horaEntrada = new Date(registro.horaEntrada);
+      const horaEntrada = new Date(registro.entrada);
 
       return horaEntrada >= inicioValidoDoExpediente;
     });
@@ -271,7 +272,7 @@ function AdminDashboard() {
     }
 
     const primeiroRegistro = registrosDoExpediente[0];
-    const horaEntrada = new Date(primeiroRegistro.horaEntrada);
+    const horaEntrada = new Date(primeiroRegistro.entrada);
 
     if (horaEntrada > limiteAtraso) {
       return {
@@ -357,7 +358,7 @@ function AdminDashboard() {
       const limiteAtraso = criarDataComHorario(academico.horarioEntrada);
       limiteAtraso.setMinutes(limiteAtraso.getMinutes() + 10);
 
-      const primeiraEntrada = new Date(registrosDia[0].horaEntrada);
+      const primeiraEntrada = new Date(registrosDia[0].entrada);
 
       return primeiraEntrada > limiteAtraso
         ? "Presente com atraso"
@@ -467,14 +468,14 @@ function AdminDashboard() {
 
     const registrosPeriodo = registros
       .filter((registro) => {
-        const dataRegistro = new Date(registro.data);
+        const dataRegistro = new Date(registro.entrada);
 
         return dataRegistro >= inicio && dataRegistro <= fim;
       })
       .sort(
         (a, b) =>
-          new Date(a.horaEntrada).getTime() -
-          new Date(b.horaEntrada).getTime()
+          new Date(a.entrada).getTime() -
+          new Date(b.entrada).getTime()
       );
 
     const linhasRelatorio: LinhaRelatorioPresenca[] = diasUteis.flatMap(
@@ -483,27 +484,27 @@ function AdminDashboard() {
 
         return academicosBolsistas.map((academico) => {
           const registrosDia = registrosPeriodo.filter((registro) => {
-            const dataRegistro = new Date(registro.data);
+            const dataRegistro = new Date(registro.entrada);
 
             return (
               obterChaveData(dataRegistro) === chaveDia &&
-              registro.academico?.email === academico.email
+              registro.nomeAcademico === academico.nome
             );
           });
 
           const totalSegundos = registrosDia.reduce(
-            (total, registro) => total + segundosDoTotal(registro.totalTrabalhado),
+            (total, registro) => total + segundosDoTotal(registro.totalHoras),
             0
           );
 
-          const primeiraEntrada = registrosDia[0]?.horaEntrada ?? null;
+          const primeiraEntrada = registrosDia[0]?.entrada ?? null;
           const registrosComSaida = registrosDia.filter(
-            (registro) => registro.horaSaida
+            (registro) => registro.saida
           );
           const ultimaSaida =
-            registrosComSaida[registrosComSaida.length - 1]?.horaSaida ?? null;
+            registrosComSaida[registrosComSaida.length - 1]?.saida ?? null;
           const temRegistroAberto = registrosDia.some(
-            (registro) => registro.horaSaida === null
+            (registro) => registro.saida === null
           );
 
           return {
@@ -652,9 +653,9 @@ const diasDoMes = Array.from(
   function registrosDoDia(dia: number) {
     return registros.some(
       (registro) =>
-        obterDiaRegistro(registro.data) === dia &&
-        obterMesRegistro(registro.data) === mesAtual &&
-        obterAnoRegistro(registro.data) === anoAtual
+        obterDiaRegistro(registro.entrada) === dia &&
+        obterMesRegistro(registro.entrada) === mesAtual &&
+        obterAnoRegistro(registro.entrada) === anoAtual
     );
   }
 
@@ -662,10 +663,8 @@ const diasDoMes = Array.from(
 
   const registrosFiltrados = registros
     .filter((registro) => {
-      const nome = String(registro.academico?.nome || "").toLowerCase();
-      const matricula = String(
-        registro.academico?.matricula || ""
-      ).toLowerCase();
+      const nome = String(registro.nomeAcademico || "").toLowerCase();
+      const matricula = "";
 
       const passouBusca =
         !termoBusca ||
@@ -674,23 +673,23 @@ const diasDoMes = Array.from(
 
       const passouDia =
         diaSelecionado === null ||
-        obterDiaRegistro(registro.data) === diaSelecionado;
+        obterDiaRegistro(registro.entrada) === diaSelecionado;
 
-      const passouMes = obterMesRegistro(registro.data) === mesAtual;
-      const passouAno = obterAnoRegistro(registro.data) === anoAtual;
+      const passouMes = obterMesRegistro(registro.entrada) === mesAtual;
+      const passouAno = obterAnoRegistro(registro.entrada) === anoAtual;
 
       return passouBusca && passouDia && passouMes && passouAno;
     })
     .sort((a, b) => {
-      const dataA = new Date(a.horaEntrada).getTime();
-      const dataB = new Date(b.horaEntrada).getTime();
+      const dataA = new Date(a.entrada).getTime();
+      const dataB = new Date(b.entrada).getTime();
 
       return dataB - dataA;
     });
 
   const registrosAgrupadosPorDia = registrosFiltrados.reduce(
     (grupos: Record<string, RegistroPonto[]>, registro) => {
-      const dataFormatada = formatarData(registro.data).toUpperCase();
+      const dataFormatada = formatarData(registro.entrada).toUpperCase();
 
       if (!grupos[dataFormatada]) {
         grupos[dataFormatada] = [];
@@ -1058,13 +1057,12 @@ const diasDoMes = Array.from(
                         <div className="flex items-start justify-between gap-8">
                           <div>
                             <p className="text-lg font-bold text-slate-900">
-                              {registro.academico?.nome ?? "Não informado"}
+                              {registro.nomeAcademico ?? "Não informado"}
                             </p>
 
                             <p className="text-sm text-slate-500">
                               Matrícula:{" "}
-                              {registro.academico?.matricula ??
-                                "Não informada"}
+                              {registro.academicoId}
                             </p>
                           </div>
 
@@ -1075,7 +1073,7 @@ const diasDoMes = Array.from(
                               </p>
 
                               <p className="mt-1 text-slate-900">
-                                {formatarHora(registro.horaEntrada)}
+                                {formatarHora(registro.entrada)}
                               </p>
                             </div>
 
@@ -1085,7 +1083,7 @@ const diasDoMes = Array.from(
                               </p>
 
                               <p className="mt-1 text-slate-900">
-                                {formatarHora(registro.horaSaida)}
+                                {formatarHora(registro.saida)}
                               </p>
                             </div>
 
@@ -1095,7 +1093,7 @@ const diasDoMes = Array.from(
                               </p>
 
                               <span className="mt-1 inline-block rounded-full bg-blue-100 px-3 py-1 font-bold text-blue-700">
-                                {formatarTotal(registro.totalTrabalhado)}
+                                {formatarTotal(registro.totalHoras)}
                               </span>
                             </div>
                           </div>

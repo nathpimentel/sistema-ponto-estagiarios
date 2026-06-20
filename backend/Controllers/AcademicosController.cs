@@ -1,10 +1,8 @@
+using backend.Services.Interfaces;
+using backend.DTOs;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Text;
 using backend.Data;
 using backend.Models;
 
@@ -15,98 +13,92 @@ namespace backend.Controllers;
 public class AcademicosController : ControllerBase
 {
     private readonly AppDbContext _context;
-    private readonly IConfiguration _configuration;
-    private readonly PasswordHasher<Academico> _passwordHasher = new();
 
-    public AcademicosController(AppDbContext context, IConfiguration configuration)
+    private readonly IConfiguration _configuration;
+
+    private readonly IAcademicoService _academicoService;
+
+    public AcademicosController(
+        AppDbContext context,
+        IConfiguration configuration,
+        IAcademicoService academicoService
+    )
     {
         _context = context;
         _configuration = configuration;
+        _academicoService = academicoService;
     }
 
-    // Retorna todos os acadêmicos cadastrados
     [Authorize(Roles = "Admin")]
     [HttpGet]
-    public IActionResult Get()
+    public async Task<IActionResult> Get(
+        int page = 1,
+        int pageSize = 10
+    )
     {
-        var academicos = _context.Academicos
-            .Where(a => a.Ativo)
-            .Select(a => new
-            {
-                a.Id,
-                a.Matricula,
-                a.Nome,
-                a.Email,
-                a.EhAdmin,
-                a.HorarioEntrada,
-                a.HorarioSaida,
-                a.PrecisaDefinirSenha,
-                a.Ativo
-            })
-            .ToList();
+        var resultado = await _academicoService
+            .ObterPaginadoAsync(page, pageSize);
 
-        return Ok(academicos);
+        return Ok(resultado);
     }
 
-    // Cadastra um novo acadêmico ou administrador
     [Authorize(Roles = "Admin")]
     [HttpPost]
-    public IActionResult Post(CriarAcademicoRequest dadosCadastro)
+    public async Task<IActionResult> Post(
+        CriarAcademicoRequest dadosCadastro
+    )
     {
-        if (string.IsNullOrWhiteSpace(dadosCadastro.Matricula))
-        {
-            return BadRequest("A matrícula é obrigatória.");
-        }
-
         if (string.IsNullOrWhiteSpace(dadosCadastro.Nome))
-        {
             return BadRequest("O nome é obrigatório.");
-        }
 
         if (string.IsNullOrWhiteSpace(dadosCadastro.Email))
-        {
             return BadRequest("O email é obrigatório.");
-        }
 
         if (!dadosCadastro.Email.EndsWith("@gmail.com"))
-        {
             return BadRequest("O email deve ser um Gmail válido.");
-        }
 
-        var emailJaExiste = _context.Academicos.Any(a =>
-            a.Ativo &&
-            a.Email == dadosCadastro.Email
-        );
-
-        if (emailJaExiste)
+        if (!dadosCadastro.EhAdmin)
         {
-            return BadRequest("Já existe um usuário cadastrado com este email.");
+            if (!TimeOnly.TryParse(dadosCadastro.HorarioEntrada, out _))
+                return BadRequest("Horário de entrada inválido.");
+
+            if (!TimeOnly.TryParse(dadosCadastro.HorarioSaida, out _))
+                return BadRequest("Horário de saída inválido.");
         }
 
-        var matriculaJaExiste = _context.Academicos.Any(a =>
-            a.Ativo &&
-            a.Matricula == dadosCadastro.Matricula
-        );
+        TimeOnly? horarioEntrada = TimeOnly.TryParse(
+            dadosCadastro.HorarioEntrada, out var he
+        ) ? he : null;
 
-        if (matriculaJaExiste)
-        {
-            return BadRequest("Já existe um usuário cadastrado com esta matrícula.");
-        }
+        TimeOnly? horarioSaida = TimeOnly.TryParse(
+            dadosCadastro.HorarioSaida, out var hs
+        ) ? hs : null;
 
         var academico = new Academico
         {
+            PrimeiroAcessoToken = Guid.NewGuid().ToString(),
+            PrimeiroAcessoTokenExpiraEm = DateTime.UtcNow.AddHours(24),
             Matricula = dadosCadastro.Matricula,
             Nome = dadosCadastro.Nome,
             Email = dadosCadastro.Email,
             EhAdmin = dadosCadastro.EhAdmin,
-            HorarioEntrada = dadosCadastro.HorarioEntrada,
-            HorarioSaida = dadosCadastro.HorarioSaida,
+            HorarioEntrada = horarioEntrada,
+            HorarioSaida = horarioSaida,
             PrecisaDefinirSenha = true,
             Ativo = true
         };
 
-        _context.Academicos.Add(academico);
-        _context.SaveChanges();
+        try
+        {
+            _context.Academicos.Add(academico);
+            await _context.SaveChangesAsync();
+        }
+        catch
+        {
+            return BadRequest(
+                "Já existe um usuário com este email ou matrícula."
+            );
+        }
 
         return Created("", new
         {
@@ -115,182 +107,53 @@ public class AcademicosController : ControllerBase
             academico.Nome,
             academico.Email,
             academico.EhAdmin,
-            academico.HorarioEntrada,
-            academico.HorarioSaida,
+            horarioEntrada = academico.HorarioEntrada?.ToString("HH:mm") ?? string.Empty,
+            horarioSaida = academico.HorarioSaida?.ToString("HH:mm") ?? string.Empty,
             academico.PrecisaDefinirSenha,
-            academico.Ativo
+            academico.Ativo,
+            primeiroAcessoToken = academico.PrimeiroAcessoToken
         });
     }
 
-    // Realiza o login dos acadêmicos e administradores
     [AllowAnonymous]
+    [EnableRateLimiting("login")]
     [HttpPost("login")]
-    public IActionResult Login(LoginRequest dadosLogin)
-    {
-        var academico = _context.Academicos.FirstOrDefault(a =>
-            a.Ativo &&
-            a.Email == dadosLogin.Email
-        );
-
-        if (academico == null || !academico.Ativo)
-        {
-            return Unauthorized("Email ou senha inválidos.");
-        }
-
-        if (academico.PrecisaDefinirSenha)
-        {
-            return StatusCode(403, "Primeiro acesso pendente. Defina sua senha para continuar.");
-        }
-
-        var resultadoSenha = VerificarSenha(academico, dadosLogin.Senha);
-
-        if (resultadoSenha == PasswordVerificationResult.Failed)
-        {
-            return Unauthorized("Email ou senha inválidos.");
-        }
-
-        if (resultadoSenha == PasswordVerificationResult.SuccessRehashNeeded)
-        {
-            academico.Senha = _passwordHasher.HashPassword(
-                academico,
-                dadosLogin.Senha
-            );
-
-            _context.SaveChanges();
-        }
-
-        var role = academico.EhAdmin ? "Admin" : "Academico";
-
-        var claims = new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, academico.Id.ToString()),
-            new Claim(ClaimTypes.Name, academico.Nome),
-            new Claim(ClaimTypes.Email, academico.Email),
-            new Claim(ClaimTypes.Role, role)
-        };
-
-        var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(_configuration["Jwt:Key"]!)
-        );
-
-        var credentials = new SigningCredentials(
-            key,
-            SecurityAlgorithms.HmacSha256
-        );
-
-        var token = new JwtSecurityToken(
-            issuer: _configuration["Jwt:Issuer"],
-            claims: claims,
-            expires: DateTime.Now.AddHours(8),
-            signingCredentials: credentials
-        );
-
-        var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
-
-        return Ok(new
-        {
-            token = tokenString,
-            academico.Id,
-            academico.Matricula,
-            academico.Nome,
-            academico.Email,
-            academico.EhAdmin,
-            academico.HorarioEntrada,
-            academico.HorarioSaida,
-            academico.PrecisaDefinirSenha,
-            academico.Ativo
-        });
-    }
-
-    [AllowAnonymous]
-    [HttpPost("primeiro-acesso")]
-    public IActionResult PrimeiroAcesso(PrimeiroAcessoRequest dadosPrimeiroAcesso)
-    {
-        if (string.IsNullOrWhiteSpace(dadosPrimeiroAcesso.Email))
-        {
-            return BadRequest("O email é obrigatório.");
-        }
-
-        if (string.IsNullOrWhiteSpace(dadosPrimeiroAcesso.Matricula))
-        {
-            return BadRequest("A matrícula é obrigatória.");
-        }
-
-        if (string.IsNullOrWhiteSpace(dadosPrimeiroAcesso.NovaSenha))
-        {
-            return BadRequest("A nova senha é obrigatória.");
-        }
-
-        if (dadosPrimeiroAcesso.NovaSenha.Length < 6)
-        {
-            return BadRequest("A nova senha deve ter pelo menos 6 caracteres.");
-        }
-
-        var academico = _context.Academicos.FirstOrDefault(a =>
-            a.Ativo &&
-            a.Email == dadosPrimeiroAcesso.Email &&
-            a.Matricula == dadosPrimeiroAcesso.Matricula
-        );
-
-        if (academico == null)
-        {
-            return NotFound("Usuário não encontrado.");
-        }
-
-        if (!academico.PrecisaDefinirSenha)
-        {
-            return BadRequest("A senha deste usuário já foi definida.");
-        }
-
-        academico.Senha = _passwordHasher.HashPassword(
-            academico,
-            dadosPrimeiroAcesso.NovaSenha
-        );
-        academico.PrecisaDefinirSenha = false;
-
-        _context.SaveChanges();
-
-        return Ok("Senha definida com sucesso. Faça login para continuar.");
-    }
-
-    private PasswordVerificationResult VerificarSenha(
-        Academico academico,
-        string senhaInformada
+    public async Task<IActionResult> Login(
+        LoginRequest dadosLogin
     )
     {
-        if (academico.Senha == senhaInformada)
-        {
-            return PasswordVerificationResult.SuccessRehashNeeded;
-        }
+        var resultado = await _academicoService.LoginAsync(dadosLogin);
 
-        try
-        {
-            return _passwordHasher.VerifyHashedPassword(
-                academico,
-                academico.Senha,
-                senhaInformada
-            );
-        }
-        catch (FormatException)
-        {
-            return PasswordVerificationResult.Failed;
-        }
+        if (resultado == null)
+            return Unauthorized("Email ou senha inválidos.");
+
+        return Ok(resultado);
     }
 
-    // Exclui um acadêmico ou administrador pelo ID
+    [AllowAnonymous]
+    [EnableRateLimiting("login")]
+    [HttpPost("primeiro-acesso")]
+    public async Task<IActionResult> PrimeiroAcesso(
+        PrimeiroAcessoRequest dadosPrimeiroAcesso
+    )
+    {
+        var sucesso = await _academicoService
+            .DefinirPrimeiraSenhaAsync(dadosPrimeiroAcesso);
+
+        if (!sucesso)
+            return BadRequest("Token inválido ou expirado.");
+
+        return Ok("Senha definida com sucesso.");
+    }
+
     [Authorize(Roles = "Admin")]
     [HttpDelete("{id}")]
-    public IActionResult Delete(int id)
+    public async Task<IActionResult> Delete(int id)
     {
-        var academico = _context.Academicos.Find(id);
+        var sucesso = await _academicoService.DeletarAsync(id);
 
-        if (academico == null || !academico.Ativo)
-        {
+        if (!sucesso)
             return NotFound("Acadêmico não encontrado.");
-        }
-
-        academico.Ativo = false;
-        _context.SaveChanges();
 
         return NoContent();
     }
