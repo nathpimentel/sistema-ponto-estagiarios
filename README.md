@@ -27,25 +27,6 @@ Aplicação fullstack para controle de entrada, saída, presença, ausência e r
 - jsPDF
 - Swagger
 
-## Como executar
-
-### Backend
-
-cd backend
-dotnet run
-
-Swagger:
-http://localhost:4000/swagger/index.html
-
-### Frontend
-
-cd frontend
-npm install
-npm run dev
-
-Frontend:
-http://localhost:5174
-
 ## Banco de dados
 
 O projeto usa SQL Server LocalDB. A estrutura do banco é criada a partir das migrations do Entity Framework Core.
